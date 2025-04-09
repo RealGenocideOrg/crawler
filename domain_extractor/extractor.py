@@ -22,14 +22,29 @@ import requests
 import boto3
 import pandas as pd
 from bs4 import BeautifulSoup
-from ..utils import (
-    load_json, 
-    save_json, 
-    extract_domain, 
-    download_file,
-    get_common_crawl_index_url,
-    logger
-)
+# Try absolute import first, fall back to relative import
+try:
+    from utils.common import (
+        load_json, 
+        save_json, 
+        extract_domain, 
+        download_file,
+        get_common_crawl_index_url,
+        logger
+    )
+except ImportError:
+    # For when the module is run directly
+    import sys
+    import os
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from utils.common import (
+        load_json, 
+        save_json, 
+        extract_domain, 
+        download_file,
+        get_common_crawl_index_url,
+        logger
+    )
 
 class DomainExtractor:
     """Extract domains from Common Crawl data based on keywords."""
