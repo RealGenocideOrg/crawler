@@ -8,6 +8,7 @@ This module provides tools to:
 """
 
 import os
+import sys
 import json
 import time
 import argparse
@@ -23,8 +24,6 @@ try:
     from utils.common import load_json, logger
 except ImportError:
     # For when the module is run directly
-    import sys
-    import os
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from utils.common import load_json, logger
 
@@ -50,15 +49,22 @@ class SupabaseUploader:
         if not self.url or not self.key:
             raise ValueError("Supabase URL and key must be provided or set as environment variables")
         
+        # Ensure URL doesn't end with a slash
+        if self.url.endswith('/'):
+            self.url = self.url[:-1]
+            
         # Create Supabase client with proper headers
-        self.client = create_client(self.url, self.key)
+        try:
+            self.client = create_client(self.url, self.key)
+        except Exception as e:
+            logger.warning(f"Failed to create Supabase client: {e}")
+            logger.warning("Will use direct REST API only")
+            self.client = None
+        
         self.table_name = table_name
         
-        # Set REST API endpoint for direct requests if needed
-        if self.url.endswith('/'):
-            self.rest_url = f"{self.url}rest/v1"
-        else:
-            self.rest_url = f"{self.url}/rest/v1"
+        # Set REST API endpoint for direct requests
+        self.rest_url = f"{self.url}/rest/v1"
             
         # Default headers for direct REST API calls
         self.headers = {
@@ -69,6 +75,7 @@ class SupabaseUploader:
         }
         
         logger.info(f"Initialized SupabaseUploader for table '{table_name}'")
+        logger.debug(f"Using REST API URL: {self.rest_url}")
 
     def create_tables_if_not_exist(self):
         """
@@ -76,10 +83,12 @@ class SupabaseUploader:
         
         This requires Supabase database access.
         """
-        # Check if table exists (this is a simplified check)
+        # Check if table exists
         try:
-            # Use direct REST API call instead of client
+            # Use direct REST API call to check table exists
             check_url = f"{self.rest_url}/{self.table_name}?select=count(*)&limit=1"
+            logger.debug(f"Checking if table exists: {check_url}")
+            
             response = requests.get(check_url, headers=self.headers)
             
             if response.status_code == 200:
@@ -117,6 +126,13 @@ class SupabaseUploader:
         try:
             # Execute SQL using direct REST API
             rpc_url = f"{self.rest_url}/rpc/run_sql"
+            logger.debug(f"Creating table using: {rpc_url}")
+            
+            # Debug headers
+            debug_headers = {k: v for k, v in self.headers.items() if k != 'Authorization'}
+            debug_headers['Authorization'] = 'Bearer ***redacted***'
+            logger.debug(f"Headers: {debug_headers}")
+            
             response = requests.post(
                 rpc_url,
                 headers=self.headers,
@@ -191,6 +207,8 @@ class SupabaseUploader:
                 
                 # Use direct REST API call
                 upsert_url = f"{self.rest_url}/{self.table_name}"
+                logger.debug(f"Upserting to: {upsert_url}")
+                
                 response = requests.post(
                     upsert_url,
                     headers={**self.headers, "Prefer": "resolution=merge-duplicates"},
@@ -224,6 +242,8 @@ class SupabaseUploader:
         try:
             # Use direct REST API call
             domains_url = f"{self.rest_url}/{self.table_name}?select=domain&limit={limit}"
+            logger.debug(f"Getting existing domains from: {domains_url}")
+            
             response = requests.get(domains_url, headers=self.headers)
             
             if response.status_code == 200:
@@ -332,12 +352,16 @@ def upload_domains(domains_file, table_name="domains", filter_existing=True):
 
 
 if __name__ == "__main__":
+    # Configure logging with more detail
+    logging.basicConfig(level=logging.DEBUG)
+    
     parser = argparse.ArgumentParser(description="Upload domains to Supabase")
     parser.add_argument("--input", required=True, help="Input JSON file with domain data")
     parser.add_argument("--table", default="domains", help="Supabase table name")
     parser.add_argument("--no-filter", action="store_true", help="Don't filter out existing domains")
     parser.add_argument("--url", help="Supabase URL (optional, defaults to env var)")
     parser.add_argument("--key", help="Supabase API key (optional, defaults to env var)")
+    parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     
     args = parser.parse_args()
     
