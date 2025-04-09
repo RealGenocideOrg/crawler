@@ -15,8 +15,23 @@ import logging
 from collections import defaultdict
 import nltk
 import spacy
-from gensim.models import KeyedVectors
-from ..utils import load_json, save_json, logger
+
+# Make gensim import optional
+try:
+    from gensim.models import KeyedVectors
+    GENSIM_AVAILABLE = True
+except ImportError:
+    GENSIM_AVAILABLE = False
+    
+# Try absolute import first, fall back to relative import
+try:
+    from utils.common import load_json, save_json, logger
+except ImportError:
+    # For when the module is run directly
+    import sys
+    import os
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from utils.common import load_json, save_json, logger
 
 # Download NLTK data if needed
 try:
@@ -46,7 +61,7 @@ class KeywordGenerator:
             raise
 
         self.word_vectors = None
-        if load_word2vec:
+        if load_word2vec and GENSIM_AVAILABLE:
             # This would require the model file to be downloaded separately
             # For simplicity, we'll make this an optional dependency
             logger.info("Loading word vectors (this may take a while)...")
@@ -60,6 +75,9 @@ class KeywordGenerator:
             except Exception as e:
                 logger.warning(f"Could not load word vectors: {e}")
                 logger.warning("Word embedding expansion will not be available")
+        elif load_word2vec and not GENSIM_AVAILABLE:
+            logger.warning("Gensim is not available. Word embedding expansion will be disabled.")
+            logger.warning("To enable it, install gensim with compatible scipy version.")
 
     def expand_with_wordnet(self, seed_words, max_synonyms=5):
         """
@@ -97,6 +115,10 @@ class KeywordGenerator:
         Returns:
             set: Expanded set of keywords
         """
+        if not GENSIM_AVAILABLE:
+            logger.warning("Gensim not available. Skipping embedding expansion.")
+            return set(seed_words)
+        
         if not self.word_vectors:
             logger.warning("Word vectors not loaded. Skipping embedding expansion.")
             return set(seed_words)
@@ -194,9 +216,11 @@ class KeywordGenerator:
         logger.info(f"Expanded to {len(expanded)} keywords using WordNet")
         
         # Expand with word embeddings if available
-        if use_embeddings and self.word_vectors:
+        if use_embeddings and GENSIM_AVAILABLE and self.word_vectors:
             expanded = self.expand_with_word_embeddings(normalized_seeds)
             logger.info(f"Expanded to {len(expanded)} keywords using word embeddings")
+        elif use_embeddings:
+            logger.warning("Word embeddings requested but not available. Using WordNet only.")
         
         # Extract entities if enabled
         if use_entities:
