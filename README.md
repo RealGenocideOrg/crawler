@@ -4,11 +4,12 @@ A modular system for extracting domain URLs related to specific keywords from Co
 
 ## Project Overview
 
-This project consists of three main components:
+This project consists of four main components:
 
 1. **Keyword Generator** - Generates and expands relevant keywords based on seed topics
-2. **Domain Extractor** - Searches Common Crawl data for domains related to specified keywords
-3. **Supabase Uploader** - Stores extracted domains and related metadata in Supabase
+2. **Google Search** - Finds domains related to keywords using Google dork techniques
+3. **Domain Extractor** - Searches Common Crawl data for domains related to specified keywords
+4. **Supabase Uploader** - Stores extracted domains and related metadata in Supabase
 
 ## Setup Instructions
 
@@ -18,6 +19,7 @@ This project consists of three main components:
 - pip package manager
 - AWS credentials (for accessing Common Crawl data in S3)
 - Supabase account and API credentials
+- Chrome or Chromium browser (for Google search module)
 
 ### Installation
 
@@ -56,13 +58,19 @@ Each component can be run independently:
 python -m keyword_generator.generator --input seeds.txt --output keywords.json
 ```
 
-### 2. Domain Extraction
+### 2. Google Search
+
+```
+python -m google_search.dork_searcher --keywords keywords.json --output dork_domains.json
+```
+
+### 3. Domain Extraction
 
 ```
 python -m domain_extractor.extractor --keywords keywords.json --output domains.json --crawl-type wet
 ```
 
-### 3. Supabase Upload
+### 4. Supabase Upload
 
 ```
 python -m supabase_uploader.uploader --input domains.json
@@ -71,7 +79,7 @@ python -m supabase_uploader.uploader --input domains.json
 ## Data Flow
 
 ```
-Seeds → Keyword Generation → Domain Extraction → Supabase Storage
+Seeds → Keyword Generation → Google Search/Domain Extraction → Supabase Storage
 ```
 
 ## Supported Common Crawl Data Types
@@ -79,6 +87,13 @@ Seeds → Keyword Generation → Domain Extraction → Supabase Storage
 - WET files (extracted text)
 - WAT files (metadata)
 - CC-Index files (URL indices)
+
+## Google Search Features
+
+- Advanced dork generation using various Google search operators
+- Support for both requests and Selenium-based search
+- Domain extraction and relevance scoring
+- Anti-blocking measures with rotating user agents and delays
 
 ## License
 
