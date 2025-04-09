@@ -1,0 +1,24 @@
+# Dependencies for Common Crawl Domain Extractor
+
+# Core dependencies
+requests==2.31.0
+boto3==1.34.25
+supabase==2.0.3
+pandas==2.1.3
+numpy==1.26.2
+
+# NLP and text processing
+nltk==3.8.1
+spacy==3.7.2
+gensim==4.3.2
+
+# Distributed processing
+pyspark==3.5.0
+
+# Web crawling
+beautifulsoup4==4.12.2
+trafilatura==1.6.2
+
+# Utility libraries
+tqdm==4.66.1
+python-dotenv==1.0.0 
