@@ -77,81 +77,6 @@ class SupabaseUploader:
         logger.info(f"Initialized SupabaseUploader for table '{table_name}'")
         logger.debug(f"Using REST API URL: {self.rest_url}")
 
-    def create_tables_if_not_exist(self):
-        """
-        Create necessary tables if they don't exist.
-        
-        This requires Supabase database access.
-        """
-        # Check if table exists
-        try:
-            # Use direct REST API call to check table exists
-            check_url = f"{self.rest_url}/{self.table_name}?select=count(*)&limit=1"
-            logger.debug(f"Checking if table exists: {check_url}")
-            
-            response = requests.get(check_url, headers=self.headers)
-            
-            if response.status_code == 200:
-                count = len(response.json())
-                logger.info(f"Table '{self.table_name}' exists, contains approximately {count} records")
-                return True
-            elif response.status_code == 404:
-                # Table doesn't exist
-                logger.warning(f"Table '{self.table_name}' not found, attempting to create...")
-            else:
-                # Other error
-                logger.warning(f"Error checking table existence: {response.status_code} - {response.text}")
-                logger.warning("Will attempt to create table anyway")
-        except Exception as e:
-            # Exception during check, try to create anyway
-            logger.warning(f"Exception checking table: {e}")
-            logger.warning("Will attempt to create table anyway")
-            
-        # Define SQL to create the domain table
-        sql = f"""
-        CREATE TABLE IF NOT EXISTS {self.table_name} (
-            id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-            domain TEXT NOT NULL UNIQUE,
-            score FLOAT NOT NULL,
-            matches JSONB,
-            keywords JSONB,
-            last_updated TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-        );
-        
-        CREATE INDEX IF NOT EXISTS {self.table_name}_domain_idx ON {self.table_name} (domain);
-        CREATE INDEX IF NOT EXISTS {self.table_name}_score_idx ON {self.table_name} (score DESC);
-        """
-        
-        try:
-            # Execute SQL using direct REST API
-            rpc_url = f"{self.rest_url}/rpc/run_sql"
-            logger.debug(f"Creating table using: {rpc_url}")
-            
-            # Debug headers
-            debug_headers = {k: v for k, v in self.headers.items() if k != 'Authorization'}
-            debug_headers['Authorization'] = 'Bearer ***redacted***'
-            logger.debug(f"Headers: {debug_headers}")
-            
-            response = requests.post(
-                rpc_url,
-                headers=self.headers,
-                json={"sql": sql}
-            )
-            
-            if response.status_code in (200, 201):
-                logger.info(f"Created table '{self.table_name}'")
-                return True
-            else:
-                logger.error(f"Failed to create table: {response.status_code} - {response.text}")
-                logger.error("Please create the table manually in the Supabase dashboard")
-                return False
-                
-        except Exception as e:
-            logger.error(f"Failed to create table: {e}")
-            logger.error("Please create the table manually in the Supabase dashboard")
-            return False
-
     def _batch_domains(self, domains, batch_size=100):
         """
         Split domains into batches for more efficient uploading.
@@ -328,10 +253,7 @@ def upload_domains(domains_file, table_name="domains", filter_existing=True):
         # Initialize uploader
         uploader = SupabaseUploader(table_name=table_name)
         
-        # Ensure tables exist
-        if not uploader.create_tables_if_not_exist():
-            logger.error("Failed to ensure required tables exist")
-            return False
+        # Table creation logic removed - assuming table exists
         
         # Upload domains
         success = uploader.upload_domains_from_file(
@@ -369,10 +291,7 @@ if __name__ == "__main__":
     try:
         uploader = SupabaseUploader(url=args.url, key=args.key, table_name=args.table)
         
-        # Ensure tables exist
-        if not uploader.create_tables_if_not_exist():
-            logger.error("Failed to ensure required tables exist")
-            sys.exit(1)
+        # Table creation logic removed - assuming table exists
         
         # Upload domains
         success = uploader.upload_domains_from_file(
