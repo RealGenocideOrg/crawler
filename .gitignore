@@ -2,3 +2,4 @@
 venv/*
 crawler.log
 *.pyc
+domains.json
