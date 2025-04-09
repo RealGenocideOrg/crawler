@@ -17,7 +17,15 @@ from typing import List, Dict, Any, Optional
 import pandas as pd
 from supabase import create_client, Client
 from dotenv import load_dotenv
-from ..utils import load_json, logger
+# Try absolute import first, fall back to relative import
+try:
+    from utils.common import load_json, logger
+except ImportError:
+    # For when the module is run directly
+    import sys
+    import os
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from utils.common import load_json, logger
 
 # Load environment variables
 load_dotenv()
