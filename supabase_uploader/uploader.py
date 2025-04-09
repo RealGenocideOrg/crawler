@@ -15,6 +15,7 @@ import logging
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 import pandas as pd
+import requests
 from supabase import create_client, Client
 from dotenv import load_dotenv
 # Try absolute import first, fall back to relative import
@@ -30,35 +31,44 @@ except ImportError:
 # Load environment variables
 load_dotenv()
 
-class DirectSupabaseUploader:
-    """Upload and manage domain data in Supabase using direct HTTP requests."""
+class SupabaseUploader:
+    """Upload and manage domain data in Supabase."""
     
-    def __init__(self, url, key, table_name="domains"):
+    def __init__(self, url=None, key=None, table_name="domains"):
         """
-        Initialize the uploader.
+        Initialize the Supabase uploader.
         
         Args:
-            url (str): Supabase URL
-            key (str): Supabase API key or service role key
+            url (str): Supabase URL (if None, read from environment variable)
+            key (str): Supabase API key (if None, read from environment variable)
             table_name (str): Name of the table to store domains
         """
-        if not url or not key:
-            raise ValueError("Supabase URL and key must be provided")
+        # Get credentials from environment if not provided
+        self.url = url or os.getenv("SUPABASE_URL")
+        self.key = key or os.getenv("SUPABASE_KEY")
         
-        # Remove trailing slash if present
-        self.url = url.rstrip('/')
-        self.key = key
+        if not self.url or not self.key:
+            raise ValueError("Supabase URL and key must be provided or set as environment variables")
+        
+        # Create Supabase client with proper headers
+        self.client = create_client(self.url, self.key)
         self.table_name = table_name
         
-        # Set up headers for authentication
+        # Set REST API endpoint for direct requests if needed
+        if self.url.endswith('/'):
+            self.rest_url = f"{self.url}rest/v1"
+        else:
+            self.rest_url = f"{self.url}/rest/v1"
+            
+        # Default headers for direct REST API calls
         self.headers = {
-            "apikey": key,
-            "Authorization": f"Bearer {key}",
+            "apikey": self.key,
+            "Authorization": f"Bearer {self.key}",
             "Content-Type": "application/json",
             "Prefer": "return=representation"
         }
         
-        logger.info(f"Initialized DirectSupabaseUploader for table '{table_name}'")
+        logger.info(f"Initialized SupabaseUploader for table '{table_name}'")
 
     def create_tables_if_not_exist(self):
         """
@@ -66,51 +76,64 @@ class DirectSupabaseUploader:
         
         This requires Supabase database access.
         """
-        # Check if table exists
-        check_url = f"{self.url}/rest/v1/{self.table_name}?select=count(*)"
-        
+        # Check if table exists (this is a simplified check)
         try:
-            response = requests.get(check_url, headers=self.headers, params={"limit": 1})
+            # Use direct REST API call instead of client
+            check_url = f"{self.rest_url}/{self.table_name}?select=count(*)&limit=1"
+            response = requests.get(check_url, headers=self.headers)
             
             if response.status_code == 200:
-                logger.info(f"Table '{self.table_name}' exists")
+                count = len(response.json())
+                logger.info(f"Table '{self.table_name}' exists, contains approximately {count} records")
                 return True
+            elif response.status_code == 404:
+                # Table doesn't exist
+                logger.warning(f"Table '{self.table_name}' not found, attempting to create...")
+            else:
+                # Other error
+                logger.warning(f"Error checking table existence: {response.status_code} - {response.text}")
+                logger.warning("Will attempt to create table anyway")
+        except Exception as e:
+            # Exception during check, try to create anyway
+            logger.warning(f"Exception checking table: {e}")
+            logger.warning("Will attempt to create table anyway")
             
-            # Table might not exist
-            logger.warning(f"Table '{self.table_name}' might not exist, attempting to create...")
+        # Define SQL to create the domain table
+        sql = f"""
+        CREATE TABLE IF NOT EXISTS {self.table_name} (
+            id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+            domain TEXT NOT NULL UNIQUE,
+            score FLOAT NOT NULL,
+            matches JSONB,
+            keywords JSONB,
+            last_updated TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        
+        CREATE INDEX IF NOT EXISTS {self.table_name}_domain_idx ON {self.table_name} (domain);
+        CREATE INDEX IF NOT EXISTS {self.table_name}_score_idx ON {self.table_name} (score DESC);
+        """
+        
+        try:
+            # Execute SQL using direct REST API
+            rpc_url = f"{self.rest_url}/rpc/run_sql"
+            response = requests.post(
+                rpc_url,
+                headers=self.headers,
+                json={"sql": sql}
+            )
             
-            # Define SQL to create the domain table
-            sql = f"""
-            CREATE TABLE IF NOT EXISTS {self.table_name} (
-                id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-                domain TEXT NOT NULL UNIQUE,
-                score FLOAT NOT NULL,
-                matches JSONB,
-                keywords JSONB,
-                last_updated TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-            );
-            
-            CREATE INDEX IF NOT EXISTS {self.table_name}_domain_idx ON {self.table_name} (domain);
-            CREATE INDEX IF NOT EXISTS {self.table_name}_score_idx ON {self.table_name} (score DESC);
-            """
-            
-            # Execute SQL using RPC
-            rpc_url = f"{self.url}/rest/v1/rpc/run_sql"
-            rpc_data = {"sql": sql}
-            
-            response = requests.post(rpc_url, headers=self.headers, json=rpc_data)
-            
-            if response.status_code in [200, 201, 204]:
+            if response.status_code in (200, 201):
                 logger.info(f"Created table '{self.table_name}'")
                 return True
             else:
-                logger.error(f"Failed to create table: {response.text}")
+                logger.error(f"Failed to create table: {response.status_code} - {response.text}")
                 logger.error("Please create the table manually in the Supabase dashboard")
                 return False
                 
         except Exception as e:
-            logger.error(f"Error checking/creating table: {e}")
+            logger.error(f"Failed to create table: {e}")
+            logger.error("Please create the table manually in the Supabase dashboard")
             return False
 
     def _batch_domains(self, domains, batch_size=100):
@@ -126,13 +149,12 @@ class DirectSupabaseUploader:
         """
         return [domains[i:i + batch_size] for i in range(0, len(domains), batch_size)]
 
-    def upsert_domains(self, domains: List[Dict[str, Any]], batch_size=100) -> bool:
+    def upsert_domains(self, domains: List[Dict[str, Any]]) -> bool:
         """
         Insert or update domains in Supabase.
         
         Args:
             domains (list): List of domain dictionaries
-            batch_size (int): Size of each batch
             
         Returns:
             bool: True if successful, False otherwise
@@ -150,7 +172,7 @@ class DirectSupabaseUploader:
                 # Format record for Supabase
                 record = {
                     "domain": domain_data["domain"],
-                    "score": domain_data.get("score", 1.0),
+                    "score": domain_data["score"],
                     "matches": json.dumps(domain_data.get("matches", {})),
                     "keywords": json.dumps(list(domain_data.get("matches", {}).keys())),
                     "last_updated": timestamp
@@ -158,26 +180,25 @@ class DirectSupabaseUploader:
                 formatted_domains.append(record)
             
             # Split into batches for more efficient processing
-            batches = self._batch_domains(formatted_domains, batch_size)
+            batches = self._batch_domains(formatted_domains)
             total_batches = len(batches)
             
             logger.info(f"Uploading {len(formatted_domains)} domains in {total_batches} batches")
             
-            # Upsert URL
-            upsert_url = f"{self.url}/rest/v1/{self.table_name}"
-            
-            # Process each batch
+            # Process each batch using direct REST API
             for i, batch in enumerate(batches):
                 logger.info(f"Processing batch {i+1}/{total_batches} ({len(batch)} domains)")
                 
-                # Add on_conflict parameter to enable upsert
-                params = {"on_conflict": "domain"}
+                # Use direct REST API call
+                upsert_url = f"{self.rest_url}/{self.table_name}"
+                response = requests.post(
+                    upsert_url,
+                    headers={**self.headers, "Prefer": "resolution=merge-duplicates"},
+                    json=batch
+                )
                 
-                # Upsert data
-                response = requests.post(upsert_url, headers=self.headers, params=params, json=batch)
-                
-                if response.status_code not in [200, 201, 202, 204]:
-                    logger.error(f"Error in batch {i+1}: {response.text}")
+                if response.status_code not in (200, 201):
+                    logger.error(f"Error in batch {i+1}: {response.status_code} - {response.text}")
                     return False
                 
                 # Small delay to avoid rate limiting
@@ -201,25 +222,75 @@ class DirectSupabaseUploader:
             list: List of domain strings
         """
         try:
-            url = f"{self.url}/rest/v1/{self.table_name}"
-            params = {
-                "select": "domain",
-                "limit": limit
-            }
-            
-            response = requests.get(url, headers=self.headers, params=params)
+            # Use direct REST API call
+            domains_url = f"{self.rest_url}/{self.table_name}?select=domain&limit={limit}"
+            response = requests.get(domains_url, headers=self.headers)
             
             if response.status_code == 200:
-                domains = [item["domain"] for item in response.json()]
+                data = response.json()
+                domains = [item["domain"] for item in data]
                 logger.info(f"Retrieved {len(domains)} existing domains")
                 return domains
             else:
-                logger.warning(f"Failed to get existing domains: {response.text}")
+                logger.warning(f"Error retrieving domains: {response.status_code} - {response.text}")
                 return []
                 
         except Exception as e:
             logger.error(f"Error retrieving existing domains: {e}")
             return []
+
+    def filter_new_domains(self, domains: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Filter out domains that already exist in the database.
+        
+        Args:
+            domains (list): List of domain dictionaries
+            
+        Returns:
+            list: Filtered list of domains
+        """
+        existing_domains = set(self.get_existing_domains())
+        
+        if not existing_domains:
+            return domains
+        
+        filtered = [d for d in domains if d["domain"] not in existing_domains]
+        
+        logger.info(f"Filtered out {len(domains) - len(filtered)} existing domains")
+        return filtered
+
+    def upload_domains_from_file(self, file_path: str, filter_existing=True, batch_size=100) -> bool:
+        """
+        Upload domains from a JSON file to Supabase.
+        
+        Args:
+            file_path (str): Path to JSON file with domain data
+            filter_existing (bool): Whether to filter out existing domains
+            batch_size (int): Size of each batch
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        # Load domains from file
+        domains = load_json(file_path)
+        
+        if not domains:
+            logger.error(f"No domains found in {file_path}")
+            return False
+        
+        logger.info(f"Loaded {len(domains)} domains from {file_path}")
+        
+        # Filter existing domains if requested
+        if filter_existing:
+            domains = self.filter_new_domains(domains)
+            
+            if not domains:
+                logger.info("No new domains to upload")
+                return True
+        
+        # Upload domains
+        return self.upsert_domains(domains)
+
 
 def upload_domains(domains_file, table_name="domains", filter_existing=True):
     """
@@ -235,43 +306,18 @@ def upload_domains(domains_file, table_name="domains", filter_existing=True):
     """
     try:
         # Initialize uploader
-        uploader = DirectSupabaseUploader(
-            url=os.getenv("SUPABASE_URL"), 
-            key=os.getenv("SUPABASE_KEY"), 
-            table_name=table_name
-        )
+        uploader = SupabaseUploader(table_name=table_name)
         
         # Ensure tables exist
         if not uploader.create_tables_if_not_exist():
             logger.error("Failed to ensure required tables exist")
             return False
         
-        # Load domains from file
-        with open(domains_file, 'r', encoding='utf-8') as f:
-            domains = json.load(f)
-        
-        if not domains:
-            logger.error(f"No domains found in {domains_file}")
-            return False
-        
-        logger.info(f"Loaded {len(domains)} domains from {domains_file}")
-        
-        # Filter existing domains if requested
-        if filter_existing:
-            existing_domains = uploader.get_existing_domains()
-            existing_set = set(existing_domains)
-            filtered = [d for d in domains if d["domain"] not in existing_set]
-            
-            logger.info(f"Filtered out {len(domains) - len(filtered)} existing domains")
-            
-            if not filtered:
-                logger.info("No new domains to upload")
-                return True
-            
-            domains = filtered
-        
         # Upload domains
-        success = uploader.upsert_domains(domains)
+        success = uploader.upload_domains_from_file(
+            domains_file,
+            filter_existing=filter_existing
+        )
         
         if success:
             logger.info("Domain upload completed successfully")
@@ -282,7 +328,6 @@ def upload_domains(domains_file, table_name="domains", filter_existing=True):
     
     except Exception as e:
         logger.error(f"Error uploading domains: {e}")
-        logger.exception("Details:")
         return False
 
 
@@ -291,7 +336,33 @@ if __name__ == "__main__":
     parser.add_argument("--input", required=True, help="Input JSON file with domain data")
     parser.add_argument("--table", default="domains", help="Supabase table name")
     parser.add_argument("--no-filter", action="store_true", help="Don't filter out existing domains")
+    parser.add_argument("--url", help="Supabase URL (optional, defaults to env var)")
+    parser.add_argument("--key", help="Supabase API key (optional, defaults to env var)")
     
     args = parser.parse_args()
     
-    upload_domains(args.input, args.table, not args.no_filter) 
+    # Initialize uploader with optional CLI credentials
+    try:
+        uploader = SupabaseUploader(url=args.url, key=args.key, table_name=args.table)
+        
+        # Ensure tables exist
+        if not uploader.create_tables_if_not_exist():
+            logger.error("Failed to ensure required tables exist")
+            sys.exit(1)
+        
+        # Upload domains
+        success = uploader.upload_domains_from_file(
+            args.input,
+            filter_existing=not args.no_filter
+        )
+        
+        if success:
+            logger.info("Domain upload completed successfully")
+            sys.exit(0)
+        else:
+            logger.error("Domain upload failed")
+            sys.exit(1)
+            
+    except Exception as e:
+        logger.error(f"Error uploading domains: {e}")
+        sys.exit(1) 
