@@ -4,52 +4,42 @@ This project provides a comprehensive solution for extracting domains related to
 
 ## Modular Architecture
 
-The project is divided into four main components, each operating independently:
+The project is divided into three main components, each operating independently:
 
 ```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│                 │    │                 │    │                 │    │                 │
-│    Keyword      │──▶│  Google Search  │──▶│     Domain      │──▶│    Supabase     │
-│   Generator     │    │  Dork Searcher  │    │    Extractor    │    │    Uploader     │
-│                 │    │                 │    │                 │    │                 │
-└─────────────────┘    └─────────────────┘    └─────────────────┘    └─────────────────┘
-       seeds.txt           keywords.json        dork_domains.json       domains.json
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│                 │    │                 │    │                 │
+│  Google Search  │──▶│     Domain      │──▶│    Supabase     │
+│  Dork Searcher  │    │    Extractor    │    │    Uploader     │
+│                 │    │                 │    │                 │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+     keywords.json       dork_domains.json       domains.json
 ```
 
 Alternatively, the Google Search and Domain Extractor modules can be used in parallel:
 
 ```
-                       ┌─────────────────┐
-                       │                 │
-                    ┌─▶│  Google Search  │─┐
-                    │  │  Dork Searcher  │ │
-┌─────────────────┐ │  │                 │ │  ┌─────────────────┐
-│                 │ │  └─────────────────┘ │  │                 │
-│    Keyword      │─┤                      ├─▶│    Supabase     │
-│   Generator     │ │  ┌─────────────────┐ │  │    Uploader     │
-│                 │ │  │                 │ │  │                 │
-└─────────────────┘ │  │     Domain      │ │  └─────────────────┘
-                    └─▶│    Extractor    │─┘
-                       │                 │
-                       └─────────────────┘
+┌─────────────────┐                      ┌─────────────────┐
+│                 │──┐               ┌──▶│                 │
+│  Google Search  │  │               │   │    Supabase     │
+│  Dork Searcher  │  │               │   │    Uploader     │
+│                 │  │               │   │                 │
+└─────────────────┘  ▼               │   └─────────────────┘
+                  ┌─────────────┐    │
+                  │   Combined  │    │
+                  │   Results   │────┘
+                  └─────────────┘
+┌─────────────────┐               
+│                 │──┐            
+│     Domain      │  │            
+│    Extractor    │  │            
+│                 │  │            
+└─────────────────┘  ▼            
 ```
 
 ## Module Descriptions
 
-### 1. Keyword Generator
-
-**Purpose**: Expand a small set of seed keywords into a comprehensive set of related terms.
-
-**Features**:
-- WordNet synonym expansion
-- Word embedding similarity (optional)
-- Named entity extraction
-- Keyword combination generation
-
-**Input**: Text file with seed keywords
-**Output**: JSON file with expanded keywords
-
-### 2. Google Search Dork Searcher
+### 1. Google Search Dork Searcher
 
 **Purpose**: Find domains related to keywords using Google search operators.
 
@@ -62,7 +52,7 @@ Alternatively, the Google Search and Domain Extractor modules can be used in par
 **Input**: JSON file with keywords
 **Output**: JSON file with domains found via Google search
 
-### 3. Domain Extractor
+### 2. Domain Extractor
 
 **Purpose**: Search Common Crawl data for domains containing content related to keywords.
 
@@ -75,7 +65,7 @@ Alternatively, the Google Search and Domain Extractor modules can be used in par
 **Input**: JSON file with keywords
 **Output**: JSON file with relevant domains and their scores
 
-### 4. Supabase Uploader
+### 3. Supabase Uploader
 
 **Purpose**: Store and manage domain data in Supabase.
 
@@ -90,17 +80,14 @@ Alternatively, the Google Search and Domain Extractor modules can be used in par
 
 ## Data Flow
 
-1. Define seed keywords related to your topic of interest
-2. Run the keyword generator to expand these to hundreds of related terms
-3. Use the Google Search module to find domains using dork techniques
-4. Process Common Crawl data with the domain extractor to find more relevant domains
-5. Upload the discovered domains to Supabase for persistent storage and analysis
+1. Prepare keywords using your preferred method (manual or LLM-based)
+2. Use the Google Search module to find domains using dork techniques
+3. Process Common Crawl data with the domain extractor to find more relevant domains
+4. Upload the discovered domains to Supabase for persistent storage and analysis
 
 ## Technology Stack
 
 - **Python 3.9+**: Core language for all components
-- **NLTK & spaCy**: For NLP processing in keyword generation
-- **Gensim**: For word embeddings (optional)
 - **Selenium & BeautifulSoup**: For Google search automation and parsing
 - **Pandas**: For efficient data manipulation
 - **Supabase**: For database storage
@@ -118,7 +105,6 @@ The project is designed to scale from small-scale testing to processing millions
 
 Each module includes multiple configuration options:
 
-- Keyword generation depth and techniques
 - Google search methods and anti-blocking settings
 - Common Crawl data types and volume
 - Supabase schema and batch processing settings
@@ -130,8 +116,7 @@ Each module includes multiple configuration options:
 Best for quick results without dealing with Common Crawl's large datasets:
 
 ```bash
-# Generate keywords
-python -m keyword_generator.generator --input seeds.txt --output keywords.json
+# Generate keywords manually or with LLM and save to keywords.json
 
 # Search with Google dorks
 python -m google_search.dork_searcher --keywords keywords.json --output dork_domains.json --use-selenium
@@ -145,8 +130,7 @@ python -m supabase_uploader.uploader --input dork_domains.json
 For more thorough but resource-intensive processing:
 
 ```bash
-# Generate keywords
-python -m keyword_generator.generator --input seeds.txt --output keywords.json
+# Generate keywords manually or with LLM and save to keywords.json
 
 # Extract domains from Common Crawl
 python -m domain_extractor.extractor --keywords keywords.json --output cc_domains.json --crawl-type wet --limit 1000
@@ -162,8 +146,7 @@ For processing large portions of multiple data sources:
 ```bash
 # Setup AWS and Supabase credentials in .env file
 
-# Generate comprehensive keywords
-python -m keyword_generator.generator --input seeds.txt --output keywords.json --use-embeddings
+# Generate keywords manually or with LLM and save to keywords.json
 
 # Find domains using Google dorks
 python -m google_search.dork_searcher --keywords keywords.json --output dork_domains.json --use-selenium --max-dorks 30
@@ -182,7 +165,6 @@ python -m supabase_uploader.uploader --input combined_domains.json --batch-size 
 
 Detailed documentation is available for each module:
 
-- [Keyword Generation Task](docs_keyword_generation.md)
 - [Google Search Task](docs_google_search.md)
 - [Domain Extraction Task](docs_domain_extraction.md)
 - [Supabase Upload Task](docs_supabase_upload.md)
@@ -191,7 +173,6 @@ Detailed documentation is available for each module:
 
 1. Clone the repository
 2. Install dependencies: `pip install -r requirements.txt`
-3. Download required NLP models: `python -m spacy download en_core_web_lg`
-4. Set up your `.env` file with credentials
-5. Start with a small set of seed keywords
-6. Follow the data flow process described above 
+3. Set up your `.env` file with credentials
+4. Create your keywords.json file with your preferred method
+5. Follow the data flow process described above 

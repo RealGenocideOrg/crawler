@@ -19,12 +19,30 @@ def main():
     """Main function to test Google Dork Searcher."""
     parser = argparse.ArgumentParser(description="Test Google Dork Searcher")
     parser.add_argument("--keywords", type=str, nargs="+", help="Keywords to search for")
+    parser.add_argument("--keywords-file", type=str, help="JSON file containing keywords")
     parser.add_argument("--use-selenium", action="store_true", help="Use Selenium for searches")
     parser.add_argument("--max-dorks", type=int, default=5, help="Maximum number of dorks to use")
     parser.add_argument("--results-per-dork", type=int, default=5, help="Number of results per dork")
     parser.add_argument("--output", default="test_results.json", help="Output file for results")
     
     args = parser.parse_args()
+    
+    # Load keywords from file if provided
+    if args.keywords_file:
+        try:
+            with open(args.keywords_file, 'r', encoding='utf-8') as f:
+                keywords_data = json.load(f)
+                
+            if isinstance(keywords_data, list):
+                args.keywords = keywords_data
+            elif isinstance(keywords_data, dict) and 'all_keywords' in keywords_data:
+                args.keywords = keywords_data['all_keywords']
+            else:
+                logger.warning("Unknown format in keywords file. Using default keywords.")
+                args.keywords = ["climate change", "renewable energy", "global warming"]
+        except Exception as e:
+            logger.error(f"Error loading keywords file: {e}")
+            args.keywords = ["climate change", "renewable energy", "global warming"]
     
     # Use default keywords if none provided
     if not args.keywords:

@@ -60,12 +60,9 @@ The input is a JSON file with keywords, which can be either:
    ["gaza war", "idf", "israel war", ...]
    ```
 
-2. The output from the keyword generator:
+2. A dictionary with an all_keywords field:
    ```json
    {
-     "seed_words": [...],
-     "categories": {...},
-     "combinations": [...],
      "all_keywords": ["gaza war", "idf", "israel war", ...]
    }
    ```
@@ -147,7 +144,7 @@ results = searcher.search_keywords_with_dorks(keywords)
 
 The Google Search module can be used together with other modules in the project:
 
-1. Generate keywords with the keyword generator
+1. Prepare a keywords.json file with relevant keywords (manually or via LLM)
 2. Use these keywords with the Google Dork Searcher to find domains
 3. Further investigate these domains with the Domain Extractor
 4. Store all results in Supabase
@@ -155,8 +152,7 @@ The Google Search module can be used together with other modules in the project:
 ### Complete Workflow Example
 
 ```bash
-# Generate keywords
-python -m keyword_generator.generator --input seeds.txt --output keywords.json
+# Prepare keywords.json file manually or via LLM
 
 # Find domains using Google dorks
 python -m google_search.dork_searcher --keywords keywords.json --output dork_domains.json --use-selenium
