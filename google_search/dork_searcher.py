@@ -112,7 +112,8 @@ class GoogleDorkSearcher:
                  country_tlds: List[str] = None,
                  selenium_timeout: int = 20,
                  max_retries: int = 3,
-                 debug_mode: bool = True):
+                 debug_mode: bool = True,
+                 chromedriver_path: Optional[str] = None):
         """
         Initialize the Google Dork Searcher.
         
@@ -125,6 +126,7 @@ class GoogleDorkSearcher:
             selenium_timeout (int): Timeout for Selenium operations in seconds
             max_retries (int): Maximum number of retries for failed operations
             debug_mode (bool): Enable detailed debug logging
+            chromedriver_path (str, optional): Path to ChromeDriver executable
         """
         self.use_selenium = use_selenium
         self.proxy = proxy
@@ -134,6 +136,7 @@ class GoogleDorkSearcher:
         self.selenium_timeout = selenium_timeout
         self.max_retries = max_retries
         self.debug_mode = debug_mode
+        self.chromedriver_path = chromedriver_path
         
         # Set up session for requests
         self.session = requests.Session()
@@ -224,12 +227,9 @@ class GoogleDorkSearcher:
                 logger.info(f"WebDriver setup attempt {attempt}/{self.max_retries}")
                 
                 options = Options()
-                options.add_argument("--headless")
+                options.add_argument("--headless=new")  # New headless mode for Chrome 109+
                 options.add_argument("--no-sandbox")
                 options.add_argument("--disable-dev-shm-usage")
-                options.add_argument(f"user-agent={random.choice(self.USER_AGENTS)}")
-                options.add_argument("--disable-blink-features=AutomationControlled")
-                options.add_argument("--disable-extensions")
                 options.add_argument("--disable-gpu")
                 options.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
                 options.add_experimental_option("useAutomationExtension", False)
@@ -258,26 +258,91 @@ class GoogleDorkSearcher:
                 except Exception as e:
                     logger.warning(f"Error checking Chrome version: {e}")
                 
-                # Get ChromeDriver
-                logger.info("Attempting to get ChromeDriver...")
-                driver_path = None
-                try:
-                    driver_path = ChromeDriverManager().install()
-                    logger.info(f"ChromeDriver installed at: {driver_path}")
-                except Exception as e:
-                    logger.error(f"ChromeDriverManager().install() failed: {e}")
-                    logger.error(f"Traceback: {traceback.format_exc()}")
-                    if attempt < self.max_retries:
-                        logger.info(f"Retrying in 5 seconds...")
-                        time.sleep(5)
-                        continue
-                    else:
-                        logger.error("Maximum retries reached. Falling back to requests.")
-                        self.use_selenium = False
-                        return
+                # Check for user-specified ChromeDriver path first
+                driver_path = self.chromedriver_path
                 
-                if driver_path is None:
-                    logger.error("ChromeDriverManager().install() returned None.")
+                if driver_path:
+                    logger.info(f"Using user-specified ChromeDriver path: {driver_path}")
+                    if not os.path.exists(driver_path):
+                        logger.error(f"Specified ChromeDriver path does not exist: {driver_path}")
+                        driver_path = None
+                
+                # If no user-specified path or it doesn't exist, search for installed ChromeDriver
+                if not driver_path:
+                    system = platform.system()
+                    
+                    # Try common ChromeDriver locations based on the platform
+                    possible_paths = []
+                    
+                    if system == "Windows":
+                        possible_paths = [
+                            r"C:\chromedriver.exe",
+                            r"C:\chromedriver\chromedriver.exe",
+                            r"C:\Program Files\chromedriver\chromedriver.exe",
+                            r"C:\Program Files (x86)\chromedriver\chromedriver.exe",
+                            r"C:\Windows\chromedriver.exe",
+                            os.path.join(os.getcwd(), "chromedriver.exe")
+                        ]
+                    elif system == "Linux":
+                        possible_paths = [
+                            "/usr/local/bin/chromedriver",
+                            "/usr/bin/chromedriver",
+                            "/snap/bin/chromedriver",
+                            os.path.join(os.getcwd(), "chromedriver")
+                        ]
+                    elif system == "Darwin":  # macOS
+                        possible_paths = [
+                            "/usr/local/bin/chromedriver",
+                            "/usr/bin/chromedriver",
+                            os.path.join(os.getcwd(), "chromedriver")
+                        ]
+                    
+                    # Log the paths we're checking
+                    logger.info(f"Checking for existing ChromeDriver in {len(possible_paths)} possible locations")
+                    
+                    # Try to find an existing ChromeDriver
+                    for path in possible_paths:
+                        if os.path.exists(path):
+                            logger.info(f"Found existing ChromeDriver at: {path}")
+                            driver_path = path
+                            break
+                    
+                    # If we couldn't find an existing driver, try to get the path using 'which' or 'where'
+                    if not driver_path:
+                        try:
+                            if system == "Windows":
+                                result = subprocess.run(['where', 'chromedriver'], capture_output=True, text=True, check=False)
+                                if result.returncode == 0 and result.stdout.strip():
+                                    driver_path = result.stdout.strip().split('\n')[0]
+                                    logger.info(f"Found ChromeDriver using 'where' command: {driver_path}")
+                            else:  # Linux or macOS
+                                result = subprocess.run(['which', 'chromedriver'], capture_output=True, text=True, check=False)
+                                if result.returncode == 0 and result.stdout.strip():
+                                    driver_path = result.stdout.strip()
+                                    logger.info(f"Found ChromeDriver using 'which' command: {driver_path}")
+                        except Exception as e:
+                            logger.warning(f"Error finding ChromeDriver using system command: {e}")
+                    
+                    # If we still don't have a driver, try to use ChromeDriverManager as a fallback
+                    if not driver_path:
+                        logger.warning("No existing ChromeDriver found, attempting to use ChromeDriverManager")
+                        try:
+                            driver_path = ChromeDriverManager().install()
+                            logger.info(f"ChromeDriver installed at: {driver_path}")
+                        except Exception as e:
+                            logger.error(f"ChromeDriverManager().install() failed: {e}")
+                            logger.error(f"Traceback: {traceback.format_exc()}")
+                            if attempt < self.max_retries:
+                                logger.info(f"Retrying in 5 seconds...")
+                                time.sleep(5)
+                                continue
+                            else:
+                                logger.error("Maximum retries reached. Falling back to requests.")
+                                self.use_selenium = False
+                                return
+                
+                if not driver_path:
+                    logger.error("Could not find or install ChromeDriver.")
                     if attempt < self.max_retries:
                         logger.info(f"Retrying in 5 seconds...")
                         time.sleep(5)
@@ -290,7 +355,7 @@ class GoogleDorkSearcher:
                 # Create service and driver
                 try:
                     logger.info(f"Creating Chrome service with driver path: {driver_path}")
-                    service = Service(driver_path)
+                    service = Service(executable_path=driver_path)
                     
                     logger.info("Creating Chrome WebDriver...")
                     self.driver = webdriver.Chrome(service=service, options=options)
@@ -985,7 +1050,8 @@ def search_with_dorks(keywords_file: str, output_file: str,
                     selenium_timeout: int = 20,
                     debug_mode: bool = True,
                     max_retries: int = 3,
-                    delay_range: Tuple[float, float] = (3.0, 8.0)):
+                    delay_range: Tuple[float, float] = (3.0, 8.0),
+                    chromedriver_path: Optional[str] = None):
     """
     Main function to search for domains using Google dorks based on keywords.
     
@@ -1000,6 +1066,7 @@ def search_with_dorks(keywords_file: str, output_file: str,
         debug_mode (bool): Enable detailed debug logging
         max_retries (int): Maximum number of retries for failed operations
         delay_range (tuple): Range of random delay between requests in seconds
+        chromedriver_path (str, optional): Path to ChromeDriver executable
         
     Returns:
         bool: True if successful, False otherwise
@@ -1011,6 +1078,9 @@ def search_with_dorks(keywords_file: str, output_file: str,
             logger.info("Debug mode enabled - verbose logging activated")
         
         logger.info(f"Starting Google dork search with params: use_selenium={use_selenium}, max_dorks={max_dorks}, results_per_dork={results_per_dork}")
+        
+        if chromedriver_path:
+            logger.info(f"Using specified ChromeDriver path: {chromedriver_path}")
         
         # Load keywords
         logger.info(f"Loading keywords from {keywords_file}")
@@ -1062,7 +1132,8 @@ def search_with_dorks(keywords_file: str, output_file: str,
             max_results_per_dork=results_per_dork,
             selenium_timeout=selenium_timeout,
             max_retries=max_retries,
-            debug_mode=debug_mode
+            debug_mode=debug_mode,
+            chromedriver_path=chromedriver_path
         )
         
         # Check if Selenium is still enabled after initialization
@@ -1132,6 +1203,7 @@ if __name__ == "__main__":
     parser.add_argument("--max-retries", type=int, default=3, help="Maximum number of retries for failed operations")
     parser.add_argument("--min-delay", type=float, default=3.0, help="Minimum delay between requests in seconds")
     parser.add_argument("--max-delay", type=float, default=8.0, help="Maximum delay between requests in seconds")
+    parser.add_argument("--chromedriver-path", help="Path to ChromeDriver executable")
     
     args = parser.parse_args()
     
@@ -1145,5 +1217,6 @@ if __name__ == "__main__":
         args.selenium_timeout,
         args.debug,
         args.max_retries,
-        (args.min_delay, args.max_delay)
+        (args.min_delay, args.max_delay),
+        args.chromedriver_path
     ) 
