@@ -9,6 +9,7 @@ This module provides tools to:
 
 import os
 import re
+import sys # Add sys import
 import time
 import json
 import random
@@ -26,12 +27,18 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from webdriver_manager.chrome import ChromeDriverManager
-from ..utils import (
-    load_json, 
-    save_json, 
-    extract_domain,
-    logger
-)
+
+# Try absolute import first, fall back to adding parent dir to sys.path
+try:
+    # Assumes 'utils' is directly under the project root (/home/crawler/crawler)
+    from utils import load_json, save_json, extract_domain, logger
+except ImportError:
+    # This handles running the script directly
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if project_root not in sys.path:
+        sys.path.append(project_root)
+    # Retry the import
+    from utils import load_json, save_json, extract_domain, logger
 
 class GoogleDorkSearcher:
     """Search for URLs using Google dorks based on keywords."""
@@ -147,7 +154,13 @@ class GoogleDorkSearcher:
             if self.proxy:
                 options.add_argument(f'--proxy-server={self.proxy}')
             
-            service = Service(ChromeDriverManager().install())
+            driver_path = ChromeDriverManager().install()
+            if driver_path is None:
+                logger.error("ChromeDriverManager().install() returned None. Check Chrome installation, version compatibility, and network connectivity.")
+                self.use_selenium = False
+                return # Exit setup if driver path is None
+                
+            service = Service(driver_path)
             self.driver = webdriver.Chrome(service=service, options=options)
             
             # Set window size
@@ -400,6 +413,14 @@ class GoogleDorkSearcher:
                             
                             if actual_url and actual_url.startswith(("http://", "https://")) and "google." not in urlparse(actual_url).netloc:
                                 urls.append(actual_url)
+
+            # Add logging if no URLs found after trying both selectors
+            if not urls:
+                logger.warning(f"No URLs extracted from response for query: {query}")
+                logger.debug(f"Response status code: {response.status_code}")
+                # Log snippet of response text for debugging
+                response_snippet = response.text[:500].replace('\n', ' ') # Limit length and remove newlines
+                logger.debug(f"Response text snippet: {response_snippet}")
             
             logger.info(f"Retrieved {len(urls)} URLs with requests")
             return urls[:num_results]

@@ -3,3 +3,5 @@ venv/*
 crawler.log
 *.pyc
 domains.json
+dork_domains.json
+keywords.json
